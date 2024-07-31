@@ -10,4 +10,4 @@ call .venv\Scripts\activate
 shift
 
 :: Run the command with the remaining arguments
-python app.py %*
+python app.py %* -d "F:\pikaraoke-songs" -p 8080 --window-size 800,600

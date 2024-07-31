@@ -11,6 +11,13 @@ from queue import Empty, Queue
 from subprocess import CalledProcessError, check_output
 from threading import Thread
 from urllib.parse import urlparse
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 import ffmpeg
 import qrcode
@@ -18,6 +25,10 @@ from unidecode import unidecode
 
 from lib.file_resolver import FileResolver
 from lib.get_platform import get_platform
+
+from flask_socketio import SocketIO,emit,send
+from app import socketio, emit
+
 
 
 # Support function for reading  lines from ffmpeg stderr without blocking
@@ -76,7 +87,7 @@ class Karaoke:
         screensaver_timeout = 300,
         url=None,
         ffmpeg_url=None,
-        prefer_hostname=True
+        prefer_hostname=True,
     ):
 
         # override with supplied constructor args if provided
@@ -368,7 +379,7 @@ class Karaoke:
         stream_url = f"{self.ffmpeg_url}/{stream_uid}"
         # pass a 0.0.0.0 IP to ffmpeg which will work for both hostnames and direct IP access
         ffmpeg_url = f"http://0.0.0.0:{self.ffmpeg_port}/{stream_uid}"
-
+        print(ffmpeg_url)
         pitch = 2**(semitones/12) #The pitch value is (2^x/12), where x represents the number of semitones
 
         try:
@@ -421,6 +432,8 @@ class Karaoke:
         t = Thread(target=enqueue_output, args=(self.ffmpeg_process.stderr, q))
         t.daemon = True
         t.start()
+        
+        # socketio.emit('message', 'PLAYING1', namespace="/" )
 
         while self.ffmpeg_process.poll() is None:
             try:  
@@ -446,7 +459,7 @@ class Karaoke:
                         time.sleep(0.1) #prevents loop from trying to replay track
                         try:  
                             output = q.get_nowait() 
-                            logging.debug("[FFMPEG] " + decode_ignore(output))
+                            logging.debug("[FFMPEG] " + decode_ignore(output))                          
                         except Empty:
                             pass
                         max_retries -= 1
@@ -504,6 +517,7 @@ class Karaoke:
 
     def queue_add_random(self, amount):
         logging.info("Adding %d random songs to queue" % amount)
+
         songs = list(self.available_songs)  # make a copy
         if len(songs) == 0:
             logging.warn("No available songs!")
@@ -640,6 +654,30 @@ class Karaoke:
         logging.info("Starting PiKaraoke!")
         logging.info(f"Connect the player host to: {self.url}/splash")
         self.running = True
+
+        print('test')
+        if not self.hide_splash_screen: 
+            # if platform == "raspberry_pi":
+            #     service = Service(executable_path='/usr/bin/chromedriver')
+            # else: 
+            service = None
+            options = Options()
+            # if args.window_size:
+            options.add_argument("--window-size=800,600")
+            options.add_argument("--window-position=0,0")
+            # options.add_argument("--kiosk")
+            options.add_argument("--start-maximized")
+            options.add_experimental_option("excludeSwitches", ['enable-automation'])
+            driver = webdriver.Chrome(service=service, options=options)
+            driver.get(f"{self.url}/splash" )
+            driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
+            # Clicking this counts as an interaction, which will allow the browser to autoplay audio
+            wait = WebDriverWait(driver, 60)
+            elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
+            elem.click()
+
+      
+
         while self.running:
             try:
                 if not self.is_file_playing() and self.now_playing != None:
@@ -656,3 +694,5 @@ class Karaoke:
             except KeyboardInterrupt:
                 logging.warn("Keyboard interrupt: Exiting pikaraoke...")
                 self.running = False
+
+        # Start the splash screen using selenium

@@ -59,7 +59,8 @@
 
   function getNowPlaying() {
     $.get('{{ url_for("nowplaying") }}', function (data) {
-      var obj = JSON.parse(data);
+      // var obj = JSON.parse(data);
+      const obj = data;
       if (obj.hash != nowPlayingHash) {
         nowPlayingHash = obj.hash;
         nowPlaying = obj;

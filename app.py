@@ -11,12 +11,17 @@ import threading
 import time
 
 import cherrypy
+
 import flask_babel
 import psutil
-from flask import (Flask, flash, make_response, redirect, render_template,
+from flask import (Flask, flash, make_response, redirect, render_template, jsonify, current_app, copy_current_request_context,
                    request, send_file, url_for)
+from flask_cors import CORS, cross_origin
 from flask_babel import Babel
-from flask_paginate import Pagination, get_page_parameter
+from flask_paginate import Pagination, get_page_parameter, get_page_args
+from flask_sock import Sock
+from flask_socketio import SocketIO,emit,send
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -24,7 +29,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-
 import karaoke
 from constants import LANGUAGES, VERSION
 from lib.get_platform import get_platform
@@ -36,16 +40,24 @@ except ImportError:
 
 _ = flask_babel.gettext
 
-
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.jinja_env.add_extension('jinja2.ext.i18n')
+app.config['TEMPLATES_AUTO_RELOAD'] = True	##DEBUG
 app.config['BABEL_TRANSLATION_DIRECTORIES'] = 'translations'
 app.config['JSON_SORT_KEYS'] = False
+app.config['SECRET_KEY'] = 'secret!'
+app.config['CORS_HEADERS'] = 'Content-Type'
+CORS(app)
 babel = Babel(app)
 site_name = "PiKaraoke"
 admin_password = None
 is_raspberry_pi = get_platform() == "raspberry_pi"
+socketio = SocketIO(app,  cors_allowed_origins="*" )
+
+xx = emit
+def broadcast(message):
+    emit('message', message, namespace="/", broadcast=True )
 
 def filename_from_path(file_path, remove_youtube_id=True):
     rc = os.path.basename(file_path)
@@ -85,9 +97,21 @@ def get_locale():
     return request.accept_languages.best_match(LANGUAGES.keys())
 
 @app.route("/")
+@cross_origin()
 def home():
     return render_template(
         "home.html",
+        site_title=site_name,
+        title="Home",
+        transpose_value=k.now_playing_transpose,
+        admin=is_admin()
+    )
+
+@app.route("/main")
+@cross_origin()
+def main():
+    return render_template(
+        "main.html",
         site_title=site_name,
         title="Home",
         transpose_value=k.now_playing_transpose,
@@ -123,6 +147,7 @@ def logout():
     return resp
 
 @app.route("/nowplaying")
+@app.route("/api/nowplaying")
 def nowplaying():
     try: 
         if len(k.queue) >= 1:
@@ -143,7 +168,7 @@ def nowplaying():
             "volume": k.volume,
         }
         rc["hash"] = hash_dict(rc) # used to detect changes in the now playing data
-        return json.dumps(rc)
+        return jsonify(rc)
     except (Exception) as e:
         logging.error("Problem loading /nowplaying, pikaraoke may still be starting up: " + str(e))
         return ""
@@ -161,15 +186,18 @@ def queue():
     )
 
 @app.route("/get_queue")
+@app.route("/api/get_queue")
 def get_queue():
     if len(k.queue) >= 1:
-        return json.dumps(k.queue)
+        return jsonify(k.queue)
     else:
-        return json.dumps([])
+        return jsonify([])
 
 @app.route("/queue/addrandom", methods=["GET"])
+@app.route("/api/queue/addrandom", methods=["GET"])
 def add_random():
     amount = int(request.args["amount"])
+    socketio.emit('message', 'RANDOM1', namespace='/')
     rc = k.queue_add_random(amount)
     if rc:
         flash("Added %s random tracks" % amount, "is-success")
@@ -207,6 +235,39 @@ def queue_edit():
                 flash("Error deleting from queue: " + song, "is-danger")
     return redirect(url_for("queue"))
 
+@app.route("/api/queue/edit", methods=["GET"])
+def api_queue_edit():
+    action = request.args["action"]
+    message=''
+    print(action)
+    if action == "clear":
+        k.queue_clear()
+        # flash("Cleared the queue!", "is-warning")
+        # return redirect(url_for("queue"))
+    else:
+        song = request.args["song"]
+        song = unquote(song)
+        if action == "down":
+            result = k.queue_edit(song, "down")
+            # if result:
+            #     flash("Moved down in queue: " + song, "is-success")
+            # else:
+            #     flash("Error moving down in queue: " + song, "is-danger")
+        elif action == "up":
+            result = k.queue_edit(song, "up")
+            if result:
+                message = "Moved up in queue: " + song, "is-success"
+            else:
+                message = "Error moving up in queue: " + song, "is-danger"
+        elif action == "delete":
+            result = k.queue_edit(song, "delete")
+            # if result:
+            #     flash("Deleted from queue: " + song, "is-success")
+            # else:
+            #     flash("Error deleting from queue: " + song, "is-danger")
+    # return redirect(url_for("queue"))
+    return jsonify(message) 
+
 
 @app.route("/enqueue", methods=["POST", "GET"])
 def enqueue():
@@ -224,26 +285,42 @@ def enqueue():
     song_title = filename_from_path(song)
     return json.dumps({"song": song_title, "success": rc })
 
+@app.route("/api/enqueue", methods=["POST", "GET"])
+def api_enqueue():
+    if "song" in request.args:
+        song = request.args["song"]
+        print(song)
+    else:
+        d = request.form.to_dict()
+        song = d["song-to-add"]
+    if "user" in request.args:
+        user = request.args["user"]
+    else:
+        d = request.form.to_dict()
+        user = d["song-added-by"]
+    rc = k.enqueue(song, user)
+    song_title = filename_from_path(song)
+    return json.dumps({"song": song_title, "success": rc })
 
 @app.route("/skip")
+@app.route("/api/skip")
 def skip():
     k.skip()
     return redirect(url_for("home"))
 
-
 @app.route("/pause")
+@app.route("/api/pause")
 def pause():
     k.pause()
     return redirect(url_for("home"))
-
 
 @app.route("/transpose/<semitones>", methods=["GET"])
 def transpose(semitones):
     k.transpose_current(int(semitones))
     return redirect(url_for("home"))
 
-
 @app.route("/restart")
+@app.route("/api/restart")
 def restart():
     k.restart()
     return redirect(url_for("home"))
@@ -285,13 +362,33 @@ def search():
         search_string=search_string,
     )
 
+@app.route("/api/search", methods=["GET"])
+def api_search():
+    if "search_string" in request.args:
+        search_string = request.args["search_string"]
+        if ("non_karaoke" in request.args and request.args["non_karaoke"] == "true"):
+            search_results = k.get_search_results(search_string)
+        else:
+            search_results = k.get_karaoke_search_results(search_string)
+    else:
+        search_string = None
+        search_results = None
+    return jsonify(
+        # site_title=site_name,
+        # title="Search",
+        # songs=k.available_songs,
+        search_results=search_results,
+        search_string=search_string,
+    )
+
 @app.route("/autocomplete")
+@app.route("/api/autocomplete")
 def autocomplete():
     q = request.args.get('q').lower()
     result = []
     for each in k.available_songs:
         if q in each.lower():
-            result.append({"path": each, "fileName": k.filename_from_path(each), "type": "autocomplete"})
+            result.append({"path": each, "fileName": k.filename_from_path(each), "type": "autocomplete" })
     response = app.response_class(
         response=json.dumps(result),
         mimetype='application/json'
@@ -309,7 +406,7 @@ def browse():
     available_songs = k.available_songs
 
     letter = request.args.get('letter')
-   
+
     if (letter):
         result = []
         if (letter == "numeric"):
@@ -332,9 +429,9 @@ def browse():
         songs = available_songs
         sort_order = "Alphabetical"
     
-    results_per_page = 500
+    results_per_page = 50
     pagination = Pagination(css_framework='bulma', page=page, total=len(songs), search=search, record_name='songs', per_page=results_per_page)
-    start_index = (page - 1) * (results_per_page - 1)
+    start_index = (page - 1) * (results_per_page )
     return render_template(
         "files.html",
         pagination=pagination,
@@ -346,6 +443,86 @@ def browse():
         songs=songs[start_index:start_index + results_per_page],
         admin=is_admin()
     )
+    # return '123'
+
+def get_items(items, offset=0, per_page=10):
+    return items[offset: offset + per_page]
+
+def getPagination(items, page=1, limit=10,   ):
+    page, per_page,  offset = get_page_args(page_parameter='page', per_page_parameter='per_page')
+    total = len(items)
+    start_index = (page - 1) * limit 
+    # pagination_items=items[start_index:start_index + limit],
+
+
+    # Create a pagination object
+    pagination = Pagination(page=page, per_page=limit, total=total, css_framework='bootstrap4')
+    # Create a response dictionary
+    response = {
+        'page': page,
+        'per_page': limit,
+        'total_items': total,
+        'total_pages': pagination.total_pages,
+        'prev': pagination.has_prev,
+        'next': pagination.has_next
+        # 'items': pagination_items
+    }
+    return response
+
+@app.route("/api/browse", methods=["GET"])
+def get_files():
+    search = False
+    q = request.args.get('q','')
+    if q:
+        search = True
+    page = request.args.get(get_page_parameter(), type=int, default=1)
+    limit = request.args.get('limit', type=int, default=10)
+    available_songs = k.available_songs
+
+    letter = request.args.get('letter')
+
+    if (letter):
+        result = []
+        if (letter == "numeric"):
+            for song in available_songs:
+                f = k.filename_from_path(song)[0]
+                if (f.isnumeric()):
+                    result.append(song)
+        else: 
+            for song in available_songs:
+                f = k.filename_from_path(song).lower()
+                if (f.startswith(letter.lower())):
+                    result.append(song)
+        available_songs = result
+
+    if "sort" in request.args and request.args["sort"] == "date":
+        songs = sorted(available_songs, key=lambda x: os.path.getctime(x))
+        songs.reverse()
+        sort_order = "Date"
+    else:
+        query_words = q.split()
+        songs = available_songs
+        sort_order = "Alphabetical"
+        if q:
+            songs = []
+            for song in available_songs:
+                if all(word in song.lower() for word in query_words):
+                    songs.append(song)
+    files = []
+    for song in songs:
+        files.append({'title': filename_from_path(song), 'file': song})
+        
+    start_index = (page - 1) * limit
+    return jsonify(
+        pagination=getPagination(files, page, limit),
+        sort_order=sort_order,
+        site_title=site_name,
+        letter=letter,
+        # MSG: Title of the files page.
+        title=_("Browse"),
+        songs=files[start_index:start_index + limit],
+        admin=is_admin()
+)
 
 
 @app.route("/download", methods=["POST"])
@@ -375,6 +552,20 @@ def download():
         flash_message += 'Song will appear in the "available songs" list.'
     flash(flash_message, "is-info")
     return redirect(url_for("search"))
+
+@app.route("/api/download", methods=["POST"])
+def api_download():
+    list = request.json
+    for item in list:
+        
+        song = item["song-url"]
+        user = item["song-added-by"]
+        print(song, user)
+        # download in the background since this can take a few minutes
+        t = threading.Thread(target=k.download_video, args=[song, queue, user])
+        t.daemon = True
+        t.start()
+    return jsonify(song=song, user=user)
 
 
 @app.route("/qrcode")
@@ -598,6 +789,7 @@ def refresh():
     return redirect(url_for("browse"))
 
 @app.route("/quit")
+@app.route("/api/quit")
 def quit():
     if (is_admin()):
         flash("Quitting pikaraoke now!", "is-warning")
@@ -679,9 +871,8 @@ if __name__ == "__main__":
     default_log_level = logging.INFO
     default_prefer_hostname = False
 
-    default_dl_dir = get_default_dl_dir(platform)
-    default_youtubedl_path = get_default_youtube_dl_path(platform)
-
+    default_dl_dir =get_default_dl_dir(platform)
+    default_youtubedl_path =get_default_youtube_dl_path(platform)
     # parse CLI args
     parser = argparse.ArgumentParser()
 
@@ -868,48 +1059,59 @@ if __name__ == "__main__":
     )
 
     # Start the CherryPy WSGI web server
-    cherrypy.tree.graft(app, "/")
-    # Set the configuration of the web server
-    cherrypy.config.update(
-        {
-            "engine.autoreload.on": False,
-            "log.screen": True,
-            "server.socket_port": int(args.port),
-            "server.socket_host": "0.0.0.0",
-            "server.thread_pool": 100
-        }
-    )
-    cherrypy.engine.start()
+    
+    # cherrypy.tree.graft(app, "/")
+    # # Set the configuration of the web server
+    # cherrypy.config.update(
+    #     {
+    #         "engine.autoreload.on": True,
+    #         "log.screen": True,
+    #         "server.socket_port": int(args.port),
+    #         "server.socket_host": "0.0.0.0",
+    #         "server.thread_pool": 100
+    #     }
+    # )
+    # # cherrypy.engine.start()
+    
 
-    # Start the splash screen using selenium
-    if not args.hide_splash_screen: 
-        if platform == "raspberry_pi":
-            service = Service(executable_path='/usr/bin/chromedriver')
-        else: 
-            service = None
-        options = Options()
+    # threading.Thread(target=lambda:app.run(host='0.0.0.0', port=args.port, threaded = True)).start()
+    # app = current_app.app_context
+    # app.app
+    with app.app_context():
 
-        if args.window_size:
-            options.add_argument("--window-size=%s" % (args.window_size))
-            options.add_argument("--window-position=0,0")
-            
-        options.add_argument("--kiosk")
-        options.add_argument("--start-maximized")
-        options.add_experimental_option("excludeSwitches", ['enable-automation'])
-        driver = webdriver.Chrome(service=service, options=options)
-        driver.get(f"{k.url}/splash" )
-        driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
-        # Clicking this counts as an interaction, which will allow the browser to autoplay audio
-        wait = WebDriverWait(driver, 60)
-        elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
-        elem.click()
+
+        threading.Thread(target=socketio.run, args=(app,), kwargs=dict(debug=False, use_reloader=False,host='0.0.0.0', port=args.port)).start()
+        threading.Thread(target=k.run ).start()
+    # socketio.run(app, debug=True, host='0.0.0.0', port=args.port)
+
+    # # Start the splash screen using selenium
+    # if not args.hide_splash_screen: 
+    #     if platform == "raspberry_pi":
+    #         service = Service(executable_path='/usr/bin/chromedriver')
+    #     else: 
+    #         service = None
+    #     options = Options()
+    #     if args.window_size:
+    #         options.add_argument("--window-size=%s" % (args.window_size))
+    #         options.add_argument("--window-position=0,0")
+    #     # options.add_argument("--kiosk")
+    #     options.add_argument("--start-maximized")
+    #     options.add_experimental_option("excludeSwitches", ['enable-automation'])
+    #     driver = webdriver.Chrome(service=service, options=options)
+    #     driver.get(f"{k.url}/splash" )
+    #     driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
+    #     # Clicking this counts as an interaction, which will allow the browser to autoplay audio
+    #     wait = WebDriverWait(driver, 60)
+    #     elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
+    #     elem.click()
+
+
 
     # Start the karaoke process
-    k.run()
+    # k.run()
 
-    # Close running processes when done
-    if not args.hide_splash_screen:
-        driver.close()
-    cherrypy.engine.exit()
+    # # Close running processes when done
+    # if not args.hide_splash_screen:
+    #     driver.close()
 
     sys.exit()

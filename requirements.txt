@@ -11,3 +11,5 @@ Flask-Babel==2.0.0
 selenium==4.21.0
 ffmpeg-python
 yt-dlp
+flask_cors
+flask-sock
