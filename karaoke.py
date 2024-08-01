@@ -655,26 +655,26 @@ class Karaoke:
         logging.info(f"Connect the player host to: {self.url}/splash")
         self.running = True
 
-        print('test')
-        if not self.hide_splash_screen: 
-            # if platform == "raspberry_pi":
-            #     service = Service(executable_path='/usr/bin/chromedriver')
-            # else: 
-            service = None
-            options = Options()
-            # if args.window_size:
-            options.add_argument("--window-size=800,600")
-            options.add_argument("--window-position=0,0")
-            # options.add_argument("--kiosk")
-            options.add_argument("--start-maximized")
-            options.add_experimental_option("excludeSwitches", ['enable-automation'])
-            driver = webdriver.Chrome(service=service, options=options)
-            driver.get(f"{self.url}/splash" )
-            driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
-            # Clicking this counts as an interaction, which will allow the browser to autoplay audio
-            wait = WebDriverWait(driver, 60)
-            elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
-            elem.click()
+        # print('test')
+        # if not self.hide_splash_screen: 
+        #     # if platform == "raspberry_pi":
+        #     #     service = Service(executable_path='/usr/bin/chromedriver')
+        #     # else: 
+        #     service = None
+        #     options = Options()
+        #     # if args.window_size:
+        #     options.add_argument("--window-size=800,600")
+        #     options.add_argument("--window-position=0,0")
+        #     # options.add_argument("--kiosk")
+        #     options.add_argument("--start-maximized")
+        #     options.add_experimental_option("excludeSwitches", ['enable-automation'])
+        #     driver = webdriver.Chrome(service=service, options=options)
+        #     driver.get(f"{self.url}/splash" )
+        #     driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
+        #     # Clicking this counts as an interaction, which will allow the browser to autoplay audio
+        #     wait = WebDriverWait(driver, 60)
+        #     elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
+        #     elem.click()
 
       
 

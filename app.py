@@ -859,9 +859,7 @@ def get_default_dl_dir(platform):
         else:
             return "~/pikaraoke-songs"
 
-
 if __name__ == "__main__":
-
     platform = get_platform()
     default_port = 5555
     default_ffmpeg_port = 5556
@@ -1060,58 +1058,53 @@ if __name__ == "__main__":
 
     # Start the CherryPy WSGI web server
     
-    # cherrypy.tree.graft(app, "/")
-    # # Set the configuration of the web server
-    # cherrypy.config.update(
-    #     {
-    #         "engine.autoreload.on": True,
-    #         "log.screen": True,
-    #         "server.socket_port": int(args.port),
-    #         "server.socket_host": "0.0.0.0",
-    #         "server.thread_pool": 100
-    #     }
-    # )
-    # # cherrypy.engine.start()
+    cherrypy.tree.graft(app, "/")
+    # Set the configuration of the web server
+    cherrypy.config.update(
+        {
+            "engine.autoreload.on": True,
+            "log.screen": True,
+            "server.socket_port": int(args.port),
+            "server.socket_host": "0.0.0.0",
+            "server.thread_pool": 100
+        }
+    )
+    cherrypy.engine.start()
     
 
-    # threading.Thread(target=lambda:app.run(host='0.0.0.0', port=args.port, threaded = True)).start()
-    # app = current_app.app_context
-    # app.app
-    with app.app_context():
-
-
-        threading.Thread(target=socketio.run, args=(app,), kwargs=dict(debug=False, use_reloader=False,host='0.0.0.0', port=args.port)).start()
-        threading.Thread(target=k.run ).start()
+    # with app.app_context():
+    #     threading.Thread(target=socketio.run, args=(app,), kwargs=dict(debug=False, use_reloader=False,host='0.0.0.0', port=args.port)).start()
+    #     threading.Thread(target=k.run ).start()
     # socketio.run(app, debug=True, host='0.0.0.0', port=args.port)
 
-    # # Start the splash screen using selenium
-    # if not args.hide_splash_screen: 
-    #     if platform == "raspberry_pi":
-    #         service = Service(executable_path='/usr/bin/chromedriver')
-    #     else: 
-    #         service = None
-    #     options = Options()
-    #     if args.window_size:
-    #         options.add_argument("--window-size=%s" % (args.window_size))
-    #         options.add_argument("--window-position=0,0")
-    #     # options.add_argument("--kiosk")
-    #     options.add_argument("--start-maximized")
-    #     options.add_experimental_option("excludeSwitches", ['enable-automation'])
-    #     driver = webdriver.Chrome(service=service, options=options)
-    #     driver.get(f"{k.url}/splash" )
-    #     driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
-    #     # Clicking this counts as an interaction, which will allow the browser to autoplay audio
-    #     wait = WebDriverWait(driver, 60)
-    #     elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
-    #     elem.click()
+    # Start the splash screen using selenium
+    if not args.hide_splash_screen: 
+        if platform == "raspberry_pi":
+            service = Service(executable_path='/usr/bin/chromedriver')
+        else: 
+            service = None
+        options = Options()
+        if args.window_size:
+            options.add_argument("--window-size=%s" % (args.window_size))
+            options.add_argument("--window-position=0,0")
+        # options.add_argument("--kiosk")
+        options.add_argument("--start-maximized")
+        options.add_experimental_option("excludeSwitches", ['enable-automation'])
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.get(f"{k.url}/splash" )
+        driver.add_cookie({'name': 'user', 'value': 'PiKaraoke-Host'})
+        # Clicking this counts as an interaction, which will allow the browser to autoplay audio
+        wait = WebDriverWait(driver, 60)
+        elem = wait.until(EC.element_to_be_clickable((By.ID, "permissions-button")))
+        elem.click()
 
 
 
     # Start the karaoke process
-    # k.run()
+    k.run()
 
-    # # Close running processes when done
-    # if not args.hide_splash_screen:
-    #     driver.close()
+    # Close running processes when done
+    if not args.hide_splash_screen:
+        driver.close()
 
     sys.exit()
